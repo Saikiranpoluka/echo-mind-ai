@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 from streamlit_google_auth import Authenticate
 from openai import OpenAI
 import mysql.connector
@@ -98,13 +99,18 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # 3. GOOGLE AUTHENTICATION SETUP
+# Recreate the Google credentials file securely on Streamlit Cloud
+if not os.path.exists("google_credentials.json"):
+    with open("google_credentials.json", "w") as f:
+        f.write(st.secrets["GOOGLE_CREDENTIALS_JSON"])
+
+# 3. GOOGLE AUTHENTICATION SETUP
 authenticator = Authenticate(
     secret_credentials_path='google_credentials.json',
     cookie_name='echo_mind_auth',
     cookie_key='secure_random_string_change_me',
-    redirect_uri='http://localhost:8501',
+    redirect_uri='https://echo-mind-ai-8054.streamlit.app/', # ⚠️ CHANGE THIS to your live Streamlit Cloud URL!
 )
-
 authenticator.check_authentification()
 
 if not st.session_state.get('connected'):
