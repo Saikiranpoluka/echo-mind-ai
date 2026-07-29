@@ -98,7 +98,22 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# 3. CUSTOM DATABASE AUTHENTICATION
+# 3. CORE DATABASE CONNECTION (Must be at the top!)
+def get_db():
+    try:
+        return mysql.connector.connect(
+            host=st.secrets["mysql"]["host"],
+            port=int(st.secrets["mysql"]["port"]),
+            user=st.secrets["mysql"]["user"],
+            password=st.secrets["mysql"]["password"],
+            database=st.secrets["mysql"]["database"],
+            ssl_ca="ca.pem"
+        )
+    except Exception as e:
+        st.error(f"Database connection failed: {e}")
+        return None
+
+# 4. CUSTOM DATABASE AUTHENTICATION
 def init_auth_db():
     """Creates the user table if it doesn't exist."""
     conn = get_db()
@@ -121,7 +136,6 @@ def create_user(email, password):
     conn = get_db()
     if conn:
         cursor = conn.cursor()
-        # Hash the password securely with a salt
         hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         try:
             cursor.execute(
@@ -131,7 +145,7 @@ def create_user(email, password):
             conn.commit()
             return True
         except mysql.connector.IntegrityError:
-            return False # Email already exists in the database
+            return False 
         finally:
             cursor.close()
             conn.close()
@@ -147,7 +161,6 @@ def authenticate_user(email, password):
         cursor.close()
         conn.close()
         
-        # If user exists, check if the password matches the hash
         if user and bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
             return True
     return False
@@ -209,20 +222,7 @@ if not st.session_state.connected:
 # If connected, set the USER_EMAIL for the rest of the app to use
 USER_EMAIL = st.session_state['user_info']['email']
 
-# 4. SESSION & DB FUNCTIONS (THREADED CHATS)
-def get_db():
-    try:
-        return mysql.connector.connect(
-            host=st.secrets["mysql"]["host"],
-            port=int(st.secrets["mysql"]["port"]),
-            user=st.secrets["mysql"]["user"],
-            password=st.secrets["mysql"]["password"],
-            database=st.secrets["mysql"]["database"],
-            ssl_ca="ca.pem"
-        )
-    except Exception:
-        return None
-
+# 5. SESSION & DB FUNCTIONS (THREADED CHATS)
 def save_chat(role, content, session_id):
     conn = get_db()
     if conn:
@@ -265,7 +265,6 @@ def get_user_chat_sessions():
     if conn:
         try:
             cursor = conn.cursor(dictionary=True)
-            # Gets the very first user message of each session to act as the title
             cursor.execute("""
                 SELECT session_id, content FROM echo_app_chat_history 
                 WHERE id IN (
@@ -308,7 +307,7 @@ def search_long_term_memory(user_query):
             pass
     return "\n".join(relevant_context)
 
-# 5. Universal Clients
+# 6. Universal Clients
 primary_client = OpenAI(api_key=st.secrets.get("PUTER_AUTH_TOKEN", ""), base_url="https://api.puter.com/puterai/openai/v1/")
 backup_client = OpenAI(api_key=st.secrets.get("BACKUP_AUTH_TOKEN", ""), base_url="https://openrouter.ai/api/v1")
 
@@ -360,8 +359,13 @@ if "uploaded_file" not in st.session_state:
 with st.sidebar:
     # 1. User Profile & Core Controls at the TOP
     st.markdown(f"👤 `{USER_EMAIL}`")
+    
+    # NEW SECURE LOGOUT LOGIC
     if st.button("🚪 Logout", use_container_width=True):
-        authenticator.logout()
+        st.session_state.connected = False
+        st.session_state.current_session_id = str(uuid.uuid4())
+        st.session_state.messages = []
+        st.rerun()
         
     st.divider()
     
@@ -384,7 +388,6 @@ with st.sidebar:
     
     if past_sessions:
         for session in past_sessions:
-            # Truncate long messages for button labels
             chat_title = session['content'][:25] + "..." if len(session['content']) > 25 else session['content']
             if st.button(f"💬 {chat_title}", key=session['session_id'], use_container_width=True):
                 st.session_state.current_session_id = session['session_id']
