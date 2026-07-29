@@ -93,7 +93,7 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# 3. Database Functions (Unchanged)
+# 3. Database Functions
 def get_db():
     try:
         return mysql.connector.connect(
@@ -158,10 +158,16 @@ def search_long_term_memory(user_query):
             pass
     return "\n".join(relevant_context)
 
-# 4. Universal Puter Client
-puter_client = OpenAI(
+# 4. Universal Clients (Primary + Backup Architecture)
+primary_client = OpenAI(
     api_key=st.secrets.get("PUTER_AUTH_TOKEN", "your_token_here"),
     base_url="https://api.puter.com/puterai/openai/v1/"
+)
+
+# OpenRouter / AgentRouter Backup Client
+backup_client = OpenAI(
+    api_key=st.secrets.get("BACKUP_AUTH_TOKEN", "your_backup_key_here"),
+    base_url="https://openrouter.ai/api/v1" # Or your AgentRouter endpoint
 )
 
 # INTERPRETER LANGUAGES
@@ -175,15 +181,12 @@ LANGUAGES = {
 # 5. Helper Utilities
 def live_web_search(query):
     try:
-        # Optimize the query for a search engine
         search_query = query + " current live rate today"
-        
-        # Use DDGS to fetch top 3 results
         results = DDGS().text(search_query, max_results=3)
         if results: 
             return "\n".join([f"- {r['title']}: {r['body']}" for r in results])
     except Exception as e:
-        print(f"⚠️ DDGS Search Error: {e}") # This will show in your terminal if it fails!
+        print(f"⚠️ DDGS Search Error: {e}")
     return ""
 
 def transcribe_audio(audio_bytes, lang_code="en-US"):
@@ -230,7 +233,6 @@ with st.sidebar:
 # ---------------- MODE: GENERAL CHAT (GEMINI CLONE) ----------------
 if mode == "💬 General Chat":
     
-    # Display Chat History
     if not st.session_state.messages:
         st.markdown("<h2 style='text-align: center; color: #E3E3E3; margin-top: 100px;'>Hello, I'm Echo Mind.</h2><p style='text-align: center; color: #C4C7C5;'>How can I help you today?</p>", unsafe_allow_html=True)
     
@@ -238,7 +240,6 @@ if mode == "💬 General Chat":
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # ➕ THE POPUVER BUTTON (Styled via CSS to hover over the chat input!)
     with st.popover("➕", use_container_width=False):
         st.markdown("**Attachments**")
         audio_in = st.audio_input("Speak:")
@@ -246,10 +247,8 @@ if mode == "💬 General Chat":
         if uploaded_file is not None:
             st.session_state.uploaded_file = uploaded_file
 
-    # The actual Chat Input
     prompt = st.chat_input("Ask Echo Mind anything...")
     
-    # Handle Audio Input Auto-submit
     if audio_in and prompt is None:
         with st.spinner("Transcribing..."):
             audio_bytes = audio_in.read()
@@ -260,7 +259,6 @@ if mode == "💬 General Chat":
     if st.session_state.uploaded_file and not prompt:
         prompt = f"Please analyze the attached file ({st.session_state.uploaded_file.name})."
 
-    # Core Execution
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         save_chat("user", prompt)
@@ -294,39 +292,48 @@ if mode == "💬 General Chat":
         {f'--- DOC CONTENT ---\n{doc_text[:4000]}' if doc_text else ''}
         {memory_context}"""
 
-        # OPTIMIZED ROUTING (100% Gemini 3.5 Flash for max speed & cheap token usage)
         active_model = "google/gemini-3.5-flash"
 
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             try:
+                # Build Payload
                 if is_image:
                     active_file.seek(0)
                     base64_img = encode_image(active_file)
-                    response = puter_client.chat.completions.create(
-                        model=active_model, 
-                        messages=[
+                    payload = {
+                        "model": active_model,
+                        "messages": [
                             {"role": "system", "content": sys_prompt},
                             {"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:{active_file.type};base64,{base64_img}"}}]}
                         ]
-                    )
+                    }
                 else:
-                    llm_messages = [{"role": "system", "content": sys_prompt}] + st.session_state.messages[-8:]
-                    response = puter_client.chat.completions.create(model=active_model, messages=llm_messages)
+                    payload = {
+                        "model": active_model,
+                        "messages": [{"role": "system", "content": sys_prompt}] + st.session_state.messages[-8:]
+                    }
+
+                # PRIMARY & BACKUP ROUTING LOGIC
+                try:
+                    response = primary_client.chat.completions.create(**payload)
+                except Exception as e_primary:
+                    st.caption(f"⚠️ *Primary API failed ({e_primary}). Switching to Backup Router...*")
+                    response = backup_client.chat.completions.create(**payload)
 
                 reply = response.choices[0].message.content
                 message_placeholder.markdown(reply)
 
                 st.session_state.messages.append({"role": "assistant", "content": reply})
                 save_chat("assistant", reply)
-                st.session_state.uploaded_file = None # Clear after success
+                st.session_state.uploaded_file = None 
 
                 if enable_audio_out:
                     audio_fp = text_to_speech(reply)
                     st.audio(audio_fp, format="audio/mp3", autoplay=True)
 
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Error (Both APIs failed): {e}")
                 st.session_state.uploaded_file = None
 
 # ---------------- MODE: LIVE INTERPRETER ----------------
@@ -354,14 +361,25 @@ elif mode == "🌐 Live Interpreter":
         if input_text:
             st.info(f"**Original:** {input_text}")
             with st.spinner("Translating..."):
-                response = puter_client.chat.completions.create(
-                    model="google/gemini-3.5-flash",
-                    messages=[{"role": "user", "content": f"Translate to {tgt_lang_name}. Output ONLY the translation: {input_text}"}]
-                )
-                translated_text = response.choices[0].message.content.strip()
-                st.success(f"**{tgt_lang_name}:**\n\n### {translated_text}")
-                audio_fp = text_to_speech(translated_text, lang_code=tgt_tts)
-                st.audio(audio_fp, format="audio/mp3", autoplay=True)
+                payload = {
+                    "model": "google/gemini-3.5-flash",
+                    "messages": [{"role": "user", "content": f"Translate to {tgt_lang_name}. Output ONLY the translation: {input_text}"}]
+                }
+                
+                try:
+                    # PRIMARY & BACKUP ROUTING LOGIC
+                    try:
+                        response = primary_client.chat.completions.create(**payload)
+                    except Exception:
+                        st.caption("⚠️ *Primary API failed. Switching to Backup Router...*")
+                        response = backup_client.chat.completions.create(**payload)
+
+                    translated_text = response.choices[0].message.content.strip()
+                    st.success(f"**{tgt_lang_name}:**\n\n### {translated_text}")
+                    audio_fp = text_to_speech(translated_text, lang_code=tgt_tts)
+                    st.audio(audio_fp, format="audio/mp3", autoplay=True)
+                except Exception as e:
+                    st.error(f"Translation Error: {e}")
 
 # ---------------- MODE: CREATIVE STUDIO ----------------
 elif mode == "🎨 Creative Studio":
@@ -371,6 +389,13 @@ elif mode == "🎨 Creative Studio":
         if img_prompt:
             with st.spinner("Painting..."):
                 try:
-                    response = puter_client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
+                    # PRIMARY & BACKUP ROUTING LOGIC
+                    try:
+                        response = primary_client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
+                    except Exception:
+                        st.caption("⚠️ *Primary API failed. Switching to Backup Router...*")
+                        response = backup_client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
+                        
                     st.image(response.data[0].url, caption=img_prompt, use_column_width=True)
-                except Exception as e: st.error(f"Failed: {e}")
+                except Exception as e: 
+                    st.error(f"Failed (Both APIs failed): {e}")
