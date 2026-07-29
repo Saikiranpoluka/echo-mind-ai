@@ -1,3 +1,4 @@
+import bcrypt
 import streamlit as st
 import os
 from streamlit_google_auth import Authenticate
@@ -98,44 +99,115 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# 3. GOOGLE AUTHENTICATION SETUP
-# Recreate the Google credentials file securely on Streamlit Cloud
-import json
+# 3. CUSTOM DATABASE AUTHENTICATION
+def init_auth_db():
+    """Creates the user table if it doesn't exist."""
+    conn = get_db()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS echo_users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
 
-# 3. GOOGLE AUTHENTICATION SETUP
-# Force recreate the file every time to clear any corrupted/empty files from previous runs
-try:
-    creds = st.secrets["GOOGLE_CREDENTIALS_JSON"]
-    with open("google_credentials.json", "w") as f:
-        # If Streamlit kept it as a string, write it directly. If it parsed it as a dict, dump it as JSON.
-        if isinstance(creds, str):
-            f.write(creds)
-        else:
-            json.dump(dict(creds), f)
-except Exception as e:
-    st.error(f"⚠️ Warning: Could not load Google Credentials from Secrets. {e}")
+def create_user(email, password):
+    """Hashes the password and saves the new user."""
+    conn = get_db()
+    if conn:
+        cursor = conn.cursor()
+        # Hash the password securely with a salt
+        hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        try:
+            cursor.execute(
+                "INSERT INTO echo_users (email, password_hash) VALUES (%s, %s)", 
+                (email, hashed_pw.decode('utf-8'))
+            )
+            conn.commit()
+            return True
+        except mysql.connector.IntegrityError:
+            return False # Email already exists in the database
+        finally:
+            cursor.close()
+            conn.close()
+    return False
 
-authenticator = Authenticate(
-    secret_credentials_path='google_credentials.json',
-    cookie_name='echo_mind_auth',
-    cookie_key='secure_random_string_change_me',
-    redirect_uri='https://echo-mind-ai-8054.streamlit.app/',
-)
-authenticator.check_authentification()
+def authenticate_user(email, password):
+    """Fetches the user and verifies the hashed password."""
+    conn = get_db()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT password_hash FROM echo_users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        # If user exists, check if the password matches the hash
+        if user and bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
+            return True
+    return False
 
-if not st.session_state.get('connected'):
+# Initialize the user table when the app boots
+init_auth_db()
+
+# --- CUSTOM LOGIN / SIGNUP UI ---
+if 'connected' not in st.session_state:
+    st.session_state.connected = False
+
+if not st.session_state.connected:
     st.markdown("""
         <div class="login-box">
             <h1 style="color: #A78BFA; margin-bottom: 10px;">✨ Echo Mind</h1>
-            <p style="color: #94A3B8; margin-bottom: 30px;">Sign in to access your secure, isolated AI workspace.</p>
+            <p style="color: #94A3B8; margin-bottom: 30px;">Sign in or create a secure account.</p>
         </div>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 1, 1])
+    col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
-        authenticator.login()
+        tab_login, tab_signup = st.tabs(["Login", "Sign Up"])
+        
+        # LOGIN TAB
+        with tab_login:
+            login_email = st.text_input("Email", key="login_email")
+            login_password = st.text_input("Password", type="password", key="login_password")
+            if st.button("Login", use_container_width=True, type="primary"):
+                if login_email and login_password:
+                    if authenticate_user(login_email, login_password):
+                        st.session_state.connected = True
+                        st.session_state['user_info'] = {'email': login_email, 'name': login_email.split('@')[0]}
+                        st.rerun()
+                    else:
+                        st.error("Invalid email or password.")
+                else:
+                    st.warning("Please enter both email and password.")
+                    
+        # SIGN UP TAB
+        with tab_signup:
+            signup_email = st.text_input("Email", key="signup_email")
+            signup_password = st.text_input("Password", type="password", key="signup_password")
+            signup_confirm = st.text_input("Confirm Password", type="password", key="signup_confirm")
+            
+            if st.button("Create Account", use_container_width=True):
+                if not signup_email or not signup_password:
+                    st.warning("Please fill out all fields.")
+                elif signup_password != signup_confirm:
+                    st.error("Passwords do not match!")
+                elif len(signup_password) < 6:
+                    st.error("Password must be at least 6 characters long.")
+                else:
+                    if create_user(signup_email, signup_password):
+                        st.success("✅ Account created successfully! You can now log in.")
+                    else:
+                        st.error("⚠️ An account with that email already exists.")
     st.stop()
 
+# If connected, set the USER_EMAIL for the rest of the app to use
 USER_EMAIL = st.session_state['user_info']['email']
 
 # 4. SESSION & DB FUNCTIONS (THREADED CHATS)
