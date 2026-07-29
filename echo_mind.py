@@ -100,16 +100,26 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # 3. GOOGLE AUTHENTICATION SETUP
 # Recreate the Google credentials file securely on Streamlit Cloud
-if not os.path.exists("google_credentials.json"):
-    with open("google_credentials.json", "w") as f:
-        f.write(st.secrets["GOOGLE_CREDENTIALS_JSON"])
+import json
 
 # 3. GOOGLE AUTHENTICATION SETUP
+# Force recreate the file every time to clear any corrupted/empty files from previous runs
+try:
+    creds = st.secrets["GOOGLE_CREDENTIALS_JSON"]
+    with open("google_credentials.json", "w") as f:
+        # If Streamlit kept it as a string, write it directly. If it parsed it as a dict, dump it as JSON.
+        if isinstance(creds, str):
+            f.write(creds)
+        else:
+            json.dump(dict(creds), f)
+except Exception as e:
+    st.error(f"⚠️ Warning: Could not load Google Credentials from Secrets. {e}")
+
 authenticator = Authenticate(
     secret_credentials_path='google_credentials.json',
     cookie_name='echo_mind_auth',
     cookie_key='secure_random_string_change_me',
-    redirect_uri='https://echo-mind-ai-8054.streamlit.app/', # ⚠️ CHANGE THIS to your live Streamlit Cloud URL!
+    redirect_uri='https://echo-mind-ai-8054.streamlit.app/',
 )
 authenticator.check_authentification()
 
