@@ -1,7 +1,6 @@
 import bcrypt
 import streamlit as st
 import os
-from streamlit_google_auth import Authenticate
 from openai import OpenAI
 import mysql.connector
 from ddgs import DDGS
