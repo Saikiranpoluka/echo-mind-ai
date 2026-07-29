@@ -1,0 +1,5 @@
+# Ignore sensitive credentials and local config
+.streamlit/secrets.toml
+__pycache__/
+*.pem
+.env
