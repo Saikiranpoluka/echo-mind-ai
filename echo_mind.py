@@ -309,7 +309,7 @@ def search_long_term_memory(user_query):
 
 # 6. Universal Clients
 primary_client = OpenAI(api_key=st.secrets.get("PUTER_AUTH_TOKEN", ""), base_url="https://api.puter.com/puterai/openai/v1/")
-backup_client = OpenAI(api_key=st.secrets.get("BACKUP_AUTH_TOKEN", ""), base_url="https://openrouter.ai/api/v1")
+backup_client = OpenAI(api_key=st.secrets.get("BACKUP_AUTH_TOKEN", ""), base_url="https://agentrouter.org")
 
 LANGUAGES = {
     "English": ("en-US", "en"), "Hindi": ("hi-IN", "hi"),
