@@ -459,10 +459,21 @@ if mode == "💬 General Chat":
                 else:
                     payload = {"model": active_model, "messages": [{"role": "system", "content": sys_prompt}] + st.session_state.messages[-8:]}
 
-                try: response = primary_client.chat.completions.create(**payload)
-                except Exception: response = backup_client.chat.completions.create(**payload)
+                try: 
+                    response = primary_client.chat.completions.create(**payload)
+                except Exception: 
+                    response = backup_client.chat.completions.create(**payload)
 
-                reply = response.choices[0].message.content
+                # --- Bulletproof Response Parser ---
+                if hasattr(response, 'choices'):
+                    reply = response.choices[0].message.content
+                elif isinstance(response, dict) and 'choices' in response:
+                    reply = response['choices'][0]['message']['content']
+                elif isinstance(response, str):
+                    reply = response # The API returned raw text (likely an error message)
+                else:
+                    reply = str(response)
+                    
                 message_placeholder.markdown(reply)
 
                 st.session_state.messages.append({"role": "assistant", "content": reply})
@@ -502,7 +513,16 @@ elif mode == "🌐 Live Interpreter":
                 try:
                     try: response = primary_client.chat.completions.create(**payload)
                     except Exception: response = backup_client.chat.completions.create(**payload)
-                    translated_text = response.choices[0].message.content.strip()
+                    
+                    # --- Bulletproof Response Parser ---
+                    if hasattr(response, 'choices'):
+                        translated_text = response.choices[0].message.content.strip()
+                    elif isinstance(response, dict) and 'choices' in response:
+                        translated_text = response['choices'][0]['message']['content'].strip()
+                    elif isinstance(response, str):
+                        translated_text = response.strip()
+                    else:
+                        translated_text = str(response).strip()
                     st.success(f"**{tgt_lang_name}:**\n\n### {translated_text}")
                     st.audio(text_to_speech(translated_text, lang_code=tgt_tts), format="audio/mp3", autoplay=True)
                 except Exception as e: st.error(f"Translation Error: {e}")
