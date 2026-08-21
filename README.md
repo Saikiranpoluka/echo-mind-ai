@@ -1,92 +1,94 @@
-# 🤖 Echo Mind: Multi-Modal AI Operating System
+# 🧠 Echo Mind: Multimodal AI Workspace
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-App-ff4b4b.svg)](https://streamlit.io/)
-[![OpenAI SDK](https://img.shields.io/badge/OpenAI-SDK-orange.svg)](https://github.com/openai/openai-python)
-[![MySQL](https://img.shields.io/badge/MySQL-Aiven-blueviolet.svg)](https://aiven.io/)
+## 📌 Overview
+Echo Mind is a production-grade, multi-tenant AI workspace featuring a liquid-smooth custom UI built on Streamlit. The platform utilizes a dual-client API architecture, leveraging Google's cutting-edge **Gemini 3.6 Flash** for high-speed, long-context text processing and **Stable Diffusion 3** (via Puter) for image generation. 
 
-**Echo Mind** is a production-grade, multi-modal AI assistant and operating system styled with a modern, responsive Gemini-inspired interface. It bridges high-speed cloud intelligence models with robust persistent memory, multi-format document/image parsing, voice synthesis, real-time speech translation, and web RAG capabilities.
+Designed for security and persistence, Echo Mind features custom MySQL-backed user authentication (bcrypt) and threaded long-term memory retrieval (RAG) for personalized chat sessions.
 
 ---
 
-## 🛠️ Tech Stack & Tools
-
-* **Frontend & UI/UX:** Streamlit, Custom HTML5/CSS3 (Gemini Dark Theme, Responsive Glassmorphism, Fixed Layout Bars)
-* **AI & LLM Orchestration:** OpenAI Python SDK, Puter AI Proxy, Google Gemini 3.5 Flash
-* **Database & Memory:** Aiven MySQL (Relational persistence, RAG long-term context search)
-* **Data Retrieval (RAG):** `ddgs` (DuckDuckGo Search engine wrapper)
-* **Multimedia & Utilities:** 
-  * `PyPDF` (Document and PDF parsing)
-  * `SpeechRecognition` & `gTTS` (Speech-to-Text and Text-to-Speech audio pipeline)
-  * `base64` (Multi-modal image encoding for vision-based queries)
+## 🎯 Key Features
+* **Dual-Client AI Architecture:** Routes text/vision tasks to Google Gemini and image generation tasks to Puter, optimizing API efficiency and bypassing proxy firewalls.
+* **Secure Multi-Tenant Auth:** Fully functional login/signup system with hashed passwords (bcrypt) stored in a secure Aiven MySQL database.
+* **Long-Term Context Memory:** Automatically saves user chat histories to the database and retrieves relevant context (RAG) for continuous, intelligent conversations.
+* **Live Web Browsing:** Integrates DuckDuckGo Search (DDGS) to pull real-time data, prices, and news directly into the LLM's context window.
+* **Multimodal Processing:** Native support for PDF text extraction, Image analysis (Base64 encoding), and Voice Input/Output (SpeechRecognition & gTTS) across 8 global languages.
+* **Liquid UI:** A highly customized, CSS-injected Streamlit interface featuring floating inputs, hidden navigation, and responsive chat bubbles.
 
 ---
 
-## 💡 Core Skills & Engineering Highlights
-
-* **Full-Stack AI Development:** Combining dynamic web interfaces with asynchronous LLM endpoints.
-* **Multi-Modal Integration:** Seamlessly handling text, voice audio blobs, local text files, PDFs, and image matrices within a unified interface.
-* **Dual Memory Architecture:** Merging short-term session state with long-term keyword-indexed database storage for context-aware interactions.
-* **Resilient Error Handling:** Graceful fallback mechanisms for web search rate limits, connection drops, and fallback data workflows.
+## 🛠️ Tech Stack
+* **Frontend:** Streamlit (Custom CSS)
+* **AI Models:** Google Gemini 3.6 Flash, Stable Diffusion 3
+* **Database:** Aiven MySQL (Secure SSL connection)
+* **Security:** `bcrypt` for password hashing
+* **Audio & Speech:** `SpeechRecognition`, `gTTS`
+* **Data Processing:** `pypdf`, `duckduckgo-search`
 
 ---
 
-## 🔄 System Architecture & Workflow
-
+## 📂 Project Structure
 ```text
- [User Input] 
-    ├── (Text / Prompt) ──┐
-    ├── (Voice / Audio) ──┼──> [Streamlit UI Layer] ──> [Smart Router / Gemini 3.5 Flash] ──> [AI Response]
-    ├── (Images / OCR) ───┤          │                                                          │
-    └── (PDF / Files) ────┘          ▼                                                          ▼
-                           [Aiven MySQL Database]                                     [gTTS Audio / UI Output]
-                           (Long-term RAG Memory)
-Input Stage: The user interacts via text input or the custom inline + popover attachment menu (supporting audio recordings, images, PDFs, and text files).
-
-Context Augmentation (RAG):
-
-Web Context: Live search queries are fetched via ddgs to inject real-time data into the system prompt.
-
-Database Context: Past messages are filtered and pulled from Aiven MySQL to maintain conversational continuity.
-
-Inference Execution: Payloads are routed through the unified OpenAI client wrapper targeting high-speed multi-modal endpoints (Gemini 3.5 Flash).
-
-Output Layer: Responses are rendered in real-time, saved back to permanent database storage, and optionally voiced out using text-to-speech synthesis or live-translated.
-
-📖 User Manual & Guide
-Modes Available
-💬 General Chat: Standard conversational agent with full multi-modal attachment support (+ popover menu) and live web RAG.
-
-🌐 Live Interpreter: Real-time speech-to-speech and text translation tool supporting multiple global languages (Hindi, Spanish, French, Japanese, Telugu, Tamil, Arabic, etc.).
-
-🎨 Creative Studio: Generative media interface utilizing standard image endpoints.
-
-👨‍🏫 Tutor Mode / 💻 Coding Agent: Specialized system personas designed for Socratic teaching and clean software engineering architectures.
-
-🎙️ Voice Mode: Dedicated speech assessment environment with visual listening states.
-
+echo-mind/
+├── app/
+│   └── app.py                     # Main Streamlit application and UI logic
+├── .streamlit/
+│   └── secrets.toml               # API keys and Database credentials (Git-ignored)
+├── ca.pem                         # Aiven MySQL SSL Certificate
+├── .gitignore
+├── README.md
+└── requirements.txt
 🚀 Getting Started Locally
-1. Clone the Repository
+Prerequisites
+Python 3.12+
+
+An Aiven MySQL Database
+
+API Keys from Google AI Studio and Puter
+
+Installation
+Clone the repository:
+
 Bash
-git clone [https://github.com/YOUR_USERNAME/echo-mind-ai.git](https://github.com/YOUR_USERNAME/echo-mind-ai.git)
-cd echo-mind-ai
-2. Install Dependencies
+git clone [https://github.com/Saikiranpoluka/echo-mind.git](https://github.com/Saikiranpoluka/echo-mind.git)
+cd echo-mind
+Create and activate a virtual environment:
+
+Bash
+python -m venv venv
+# Windows:
+.\venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
+Install dependencies:
+
 Bash
 pip install -r requirements.txt
-3. Configure Secrets
-Create a .streamlit/secrets.toml file in your root directory with your credentials:
+Configure your .streamlit/secrets.toml:
 
 Ini, TOML
-PUTER_AUTH_TOKEN = "your_puter_auth_token_here"
+PUTER_AUTH_TOKEN = "your_puter_key_here"
+GEMINI_API_KEY = "your_gemini_key_here"
 
 [mysql]
-host = "your_mysql_host_here"
-port = 3306
-user = "your_mysql_user"
-password = "your_mysql_password"
+host = "your_database_host"
+port = 25138
+user = "your_database_user"
+password = "your_database_password"
 database = "your_database_name"
-(Note: Ensure your Aiven MySQL SSL certificate (ca.pem) is placed in the root directory if required by your database tier).
+Launch the application:
 
-4. Run the Application
 Bash
-streamlit run echo_mind.py
+streamlit run app/app.py
+☁️ Cloud Deployment (Streamlit Community Cloud)
+When deploying to Streamlit Community Cloud, ensure the following steps are taken to bypass security constraints:
+
+Do not push .streamlit/secrets.toml to GitHub. Add your secrets directly into the Streamlit Cloud dashboard under App Settings > Secrets.
+
+Ensure the ca.pem file is pushed to the root of your GitHub repository so the cloud server can establish a secure SSL connection to the MySQL database.
+
+Author: Poluka Venkata Sai Kiran Reddy
+
+Degree: B.Tech Electronics and Communications Engineering
+
+Focus: Full-Stack AI Engineering & Database Architectures
