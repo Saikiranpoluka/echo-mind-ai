@@ -1,7 +1,6 @@
 import bcrypt
 import streamlit as st
 import os
-from openai import OpenAI
 import mysql.connector
 from ddgs import DDGS
 import speech_recognition as sr
@@ -10,11 +9,15 @@ import io
 import base64
 import pypdf
 import uuid
-import json
+
+# --- NEW LANGCHAIN & OPENAI IMPORTS ---
+from openai import OpenAI
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_anthropic import ChatAnthropic
 
 # 1. PAGE CONFIGURATION
 st.set_page_config(
-    page_title="Echo Mind - Gemini Clone",
+    page_title="Echo Mind - Claude Opus",
     page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -320,15 +323,19 @@ def search_long_term_memory(user_query):
     return "\n".join(relevant_context)
 
 # 6. UNIVERSAL API CLIENTS
-primary_client = OpenAI(
+
+# Image Generation Client (OpenAI via Puter)
+image_client = OpenAI(
     api_key=st.secrets.get("PUTER_AUTH_TOKEN", ""), 
     base_url="https://api.puter.com/puterai/openai/v1/"
 )
 
-# WAF Bypass via spoofed RooCode headers for AgentRouter
-backup_client = OpenAI(
-    api_key=st.secrets.get("BACKUP_AUTH_TOKEN", ""), 
-    base_url="https://agentrouter.org",
+# Text/Chat Client (LangChain Anthropic via AgentRouter - WAF Bypassed)
+agent_router_key = st.secrets.get("BACKUP_AUTH_TOKEN", "")
+chat_client = ChatAnthropic(
+    model="claude-opus-5",
+    api_key=agent_router_key,
+    base_url="https://agentrouter.org/",
     default_headers={
         "User-Agent": "RooCode/3.34.8",
         "X-Title": "Roo Code",
@@ -336,7 +343,7 @@ backup_client = OpenAI(
         "X-Stainless-Runtime": "node",
         "X-Stainless-Runtime-Version": "v18.17.0"
     }
-)
+) if agent_router_key else None
 
 LANGUAGES = {
     "English": ("en-US", "en"), "Hindi": ("hi-IN", "hi"),
@@ -346,33 +353,16 @@ LANGUAGES = {
 }
 
 # 7. PRODUCTION HELPER UTILITIES
-def parse_ai_response(response):
-    """Bulletproof parser handling standard OpenAI, strings, WAF captures, and Anthropic lists."""
-    if isinstance(response, list):
-        blocks = [b.get("text", "") for b in response if isinstance(b, dict) and b.get("type") == "text"]
-        return "\n".join(blocks) if blocks else str(response)
-
-    reply = ""
-    if hasattr(response, 'choices'):
-        reply = response.choices[0].message.content
-    elif isinstance(response, dict):
-        if 'choices' in response and len(response['choices']) > 0:
-            reply = response['choices'][0]['message']['content']
-        elif 'content' in response: 
-            reply = response['content']
-    elif isinstance(response, str):
-        if "<html" in response.lower() or "aliyun" in response.lower() or "cloudflare" in response.lower():
-            return "⚠️ **API Firewall Block:** The AI provider's security system temporarily blocked the request."
-        reply = response
+def extract_anthropic_text(response):
+    """Uses your exact logic to extract text blocks from the LangChain Anthropic response."""
+    if isinstance(response.content, list):
+        reply_parts = []
+        for block in response.content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                reply_parts.append(block.get("text"))
+        return "\n".join(reply_parts)
     else:
-        reply = str(response)
-
-    # Secondary check if the extracted reply itself is an Anthropic list
-    if isinstance(reply, list):
-        blocks = [b.get("text", "") for b in reply if isinstance(b, dict) and b.get("type") == "text"]
-        return "\n".join(blocks) if blocks else str(reply)
-        
-    return reply
+        return str(response.content)
 
 def live_web_search(query):
     try:
@@ -494,33 +484,47 @@ if mode == "💬 General Chat":
         {f'--- DOC CONTENT ---\n{doc_text[:4000]}' if doc_text else ''}
         {memory_context}"""
 
-        active_model = "google/gemini-3.5-flash"
-
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
-            try:
-                if is_image:
-                    uploaded_file.seek(0)
-                    base64_img = encode_image(uploaded_file)
-                    history_payload = st.session_state.messages[-8:-1] if len(st.session_state.messages) > 1 else []
-                    image_content = [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:{uploaded_file.type};base64,{base64_img}"}}]
-                    payload = {"model": active_model, "messages": [{"role": "system", "content": sys_prompt}] + history_payload + [{"role": "user", "content": image_content}]}
-                else:
-                    payload = {"model": active_model, "messages": [{"role": "system", "content": sys_prompt}] + st.session_state.messages[-8:]}
+            
+            if not chat_client:
+                st.error("AgentRouter API Key missing. Please check secrets.toml")
+            else:
+                try:
+                    # Construct LangChain Messages
+                    lc_messages = [SystemMessage(content=sys_prompt)]
+                    
+                    # Fetch history (excluding the current prompt if we have an image to attach)
+                    history_msgs = st.session_state.messages[-8:-1] if is_image else st.session_state.messages[-8:]
+                    for m in history_msgs:
+                        if m["role"] == "user": lc_messages.append(HumanMessage(content=m["content"]))
+                        else: lc_messages.append(AIMessage(content=m["content"]))
+                    
+                    if is_image:
+                        uploaded_file.seek(0)
+                        base64_img = encode_image(uploaded_file)
+                        mime_type = uploaded_file.type
+                        # Langchain image attachment format
+                        lc_messages.append(HumanMessage(content=[
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_img}"}}
+                        ]))
 
-                try: raw_response = primary_client.chat.completions.create(**payload)
-                except Exception: raw_response = backup_client.chat.completions.create(**payload)
+                    # Invoke ChatAnthropic model
+                    response = chat_client.invoke(lc_messages)
+                    
+                    # Extract text using your custom logic
+                    reply = extract_anthropic_text(response)
+                    
+                    message_placeholder.markdown(reply)
 
-                reply = parse_ai_response(raw_response)
-                message_placeholder.markdown(reply)
+                    st.session_state.messages.append({"role": "assistant", "content": reply})
+                    save_chat("assistant", reply, st.session_state.current_session_id)
 
-                st.session_state.messages.append({"role": "assistant", "content": reply})
-                save_chat("assistant", reply, st.session_state.current_session_id)
+                    if enable_audio_out: st.audio(text_to_speech(reply), format="audio/mp3", autoplay=True)
 
-                if enable_audio_out: st.audio(text_to_speech(reply), format="audio/mp3", autoplay=True)
-
-            except Exception as e:
-                st.error(f"Execution Error: {e}")
+                except Exception as e:
+                    st.error(f"Execution Error: {e}")
 
 # ---------------- MODE: LIVE INTERPRETER ----------------
 elif mode == "🌐 Live Interpreter":
@@ -546,16 +550,18 @@ elif mode == "🌐 Live Interpreter":
         if input_text:
             st.info(f"**Original:** {input_text}")
             with st.spinner("Translating..."):
-                payload = {"model": "google/gemini-3.5-flash", "messages": [{"role": "user", "content": f"Translate to {tgt_lang_name}. Output ONLY the direct translation of this text: {input_text}"}]}
-                try:
-                    try: raw_response = primary_client.chat.completions.create(**payload)
-                    except Exception: raw_response = backup_client.chat.completions.create(**payload)
-                    
-                    translated_text = parse_ai_response(raw_response)
-                    st.success(f"**{tgt_lang_name}:**\n\n### {translated_text}")
-                    st.audio(text_to_speech(translated_text, lang_code=tgt_tts), format="audio/mp3", autoplay=True)
-                except Exception as e: 
-                    st.error(f"Translation Error: {e}")
+                if not chat_client:
+                    st.error("AgentRouter API Key missing.")
+                else:
+                    try:
+                        lc_messages = [HumanMessage(content=f"Translate to {tgt_lang_name}. Output ONLY the direct translation of this text: {input_text}")]
+                        response = chat_client.invoke(lc_messages)
+                        
+                        translated_text = extract_anthropic_text(response).strip()
+                        st.success(f"**{tgt_lang_name}:**\n\n### {translated_text}")
+                        st.audio(text_to_speech(translated_text, lang_code=tgt_tts), format="audio/mp3", autoplay=True)
+                    except Exception as e: 
+                        st.error(f"Translation Error: {e}")
 
 # ---------------- MODE: CREATIVE STUDIO ----------------
 elif mode == "🎨 Creative Studio":
@@ -564,9 +570,7 @@ elif mode == "🎨 Creative Studio":
     if st.button("✨ Generate", type="primary") and img_prompt:
         with st.spinner("Painting..."):
             try:
-                try: response = primary_client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
-                except Exception: response = backup_client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
-                
+                response = image_client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
                 if hasattr(response, 'data') and len(response.data) > 0:
                     st.image(response.data[0].url, caption=img_prompt, use_column_width=True)
                 else:
