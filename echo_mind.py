@@ -9,11 +9,7 @@ import io
 import base64
 import pypdf
 import uuid
-
-# --- LANGCHAIN & OPENAI IMPORTS ---
 from openai import OpenAI
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from langchain_anthropic import ChatAnthropic
 
 # 1. PAGE CONFIGURATION
 st.set_page_config(
@@ -310,29 +306,18 @@ def search_long_term_memory(user_query):
             pass
     return "\n".join(relevant_context)
 
+
 # 6. UNIVERSAL API CLIENTS
+# Puter normalizes Anthropic, DeepSeek, and OpenAI endpoints, so we just use the standard OpenAI client for everything.
+puter_api_key = st.secrets.get("PUTER_AUTH_TOKEN", "")
 
-image_client = OpenAI(
-    api_key=st.secrets.get("PUTER_AUTH_TOKEN", ""), 
+# This single client handles Claude text generation and DALL-E image generation
+client = OpenAI(
+    api_key=puter_api_key, 
     base_url="https://api.puter.com/puterai/openai/v1/"
-)
+) if puter_api_key else None
 
-# Robust WAF bypass implementation mirroring your successful script
-agent_router_key = st.secrets.get("BACKUP_AUTH_TOKEN", "")
-waf_headers = {
-    "User-Agent": "RooCode/3.34.8",
-    "X-Title": "Roo Code",
-    "HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
-    "X-Stainless-Runtime": "node",
-    "X-Stainless-Runtime-Version": "v18.17.0"
-}
-
-chat_client = ChatAnthropic(
-    model="claude-opus-5",
-    api_key=agent_router_key,
-    base_url="https://agentrouter.org/",
-    default_headers=waf_headers
-) if agent_router_key else None
+ACTIVE_MODEL = "anthropic/claude-opus-5"
 
 LANGUAGES = {
     "English": ("en-US", "en"), "Hindi": ("hi-IN", "hi"),
@@ -342,17 +327,6 @@ LANGUAGES = {
 }
 
 # 7. PRODUCTION HELPER UTILITIES
-def extract_anthropic_text(response):
-    """Safely extracts Anthropic text blocks identically to your script."""
-    if isinstance(response.content, list):
-        reply_parts = []
-        for block in response.content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                reply_parts.append(block.get("text"))
-        return "\n".join(reply_parts)
-    else:
-        return str(response.content)
-
 def live_web_search(query):
     try:
         results = DDGS().text(query, max_results=3)
@@ -425,7 +399,7 @@ with st.sidebar:
     else:
         st.caption("No recent chats found.")
 
-# ---------------- MODE: GENERAL Chat ----------------
+# ---------------- MODE: GENERAL CHAT ----------------
 if mode == "💬 General Chat":
     
     if not st.session_state.messages:
@@ -476,29 +450,35 @@ if mode == "💬 General Chat":
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             
-            if not chat_client:
-                st.error("AgentRouter API Key missing. Please check secrets.toml")
+            if not client:
+                st.error("Puter API Key missing. Please check secrets.toml")
             else:
                 try:
-                    # Construct strict LangChain objects to prevent Pydantic crashes
-                    lc_messages = [SystemMessage(content=sys_prompt)]
-                    
-                    history_msgs = st.session_state.messages[-8:-1] if is_image else st.session_state.messages[-8:]
-                    for m in history_msgs:
-                        if m["role"] == "user": lc_messages.append(HumanMessage(content=str(m["content"])))
-                        else: lc_messages.append(AIMessage(content=str(m["content"])))
-                    
                     if is_image:
                         uploaded_file.seek(0)
                         base64_img = encode_image(uploaded_file)
-                        lc_messages.append(HumanMessage(content=[
+                        
+                        # Grab recent history excluding current prompt
+                        history_msgs = st.session_state.messages[-8:-1] if len(st.session_state.messages) > 1 else []
+                        
+                        image_payload = [
                             {"type": "text", "text": prompt},
                             {"type": "image_url", "image_url": {"url": f"data:{uploaded_file.type};base64,{base64_img}"}}
-                        ]))
+                        ]
+                        
+                        payload = {
+                            "model": ACTIVE_MODEL, 
+                            "messages": [{"role": "system", "content": sys_prompt}] + history_msgs + [{"role": "user", "content": image_payload}]
+                        }
+                    else:
+                        payload = {
+                            "model": ACTIVE_MODEL,
+                            "messages": [{"role": "system", "content": sys_prompt}] + st.session_state.messages[-8:]
+                        }
 
-                    # API Execution
-                    response = chat_client.invoke(lc_messages)
-                    reply = extract_anthropic_text(response)
+                    # Standard OpenAI execute (Puter dynamically translates to Anthropic)
+                    response = client.chat.completions.create(**payload)
+                    reply = response.choices[0].message.content
                     
                     message_placeholder.markdown(reply)
                     st.session_state.messages.append({"role": "assistant", "content": reply})
@@ -507,11 +487,7 @@ if mode == "💬 General Chat":
                     if enable_audio_out: st.audio(text_to_speech(reply), format="audio/mp3", autoplay=True)
 
                 except Exception as e:
-                    # Fallback parser if WAF blocks the datacenter IP and crashes LangChain
-                    if "model_dump" in str(e).lower() or "str" in str(e).lower() or "validation" in str(e).lower():
-                        st.error("⚠️ **API Firewall Block:** The AI proxy firewall is blocking Streamlit Cloud's datacenter IP addresses. Your local test bypassed it, but cloud IPs are flagged by Aliyun WAF.")
-                    else:
-                        st.error(f"Execution Error: {e}")
+                    st.error(f"Execution Error: {e}")
 
 # ---------------- MODE: LIVE INTERPRETER ----------------
 elif mode == "🌐 Live Interpreter":
@@ -537,21 +513,22 @@ elif mode == "🌐 Live Interpreter":
         if input_text:
             st.info(f"**Original:** {input_text}")
             with st.spinner("Translating..."):
-                if not chat_client:
-                    st.error("AgentRouter API Key missing.")
+                if not client:
+                    st.error("Puter API Key missing.")
                 else:
                     try:
-                        lc_messages = [HumanMessage(content=f"Translate to {tgt_lang_name}. Output ONLY the direct translation of this text: {input_text}")]
-                        response = chat_client.invoke(lc_messages)
+                        payload = {
+                            "model": ACTIVE_MODEL,
+                            "messages": [{"role": "user", "content": f"Translate to {tgt_lang_name}. Output ONLY the direct translation of this text: {input_text}"}]
+                        }
                         
-                        translated_text = extract_anthropic_text(response).strip()
+                        response = client.chat.completions.create(**payload)
+                        translated_text = response.choices[0].message.content.strip()
+                        
                         st.success(f"**{tgt_lang_name}:**\n\n### {translated_text}")
                         st.audio(text_to_speech(translated_text, lang_code=tgt_tts), format="audio/mp3", autoplay=True)
                     except Exception as e: 
-                        if "model_dump" in str(e).lower() or "str" in str(e).lower():
-                            st.error("⚠️ **API Firewall Block:** Streamlit Cloud's IP address was flagged by the AgentRouter WAF.")
-                        else:
-                            st.error(f"Translation Error: {e}")
+                        st.error(f"Translation Error: {e}")
 
 # ---------------- MODE: CREATIVE STUDIO ----------------
 elif mode == "🎨 Creative Studio":
@@ -559,11 +536,14 @@ elif mode == "🎨 Creative Studio":
     img_prompt = st.text_area("Describe the image:")
     if st.button("✨ Generate", type="primary") and img_prompt:
         with st.spinner("Painting..."):
-            try:
-                response = image_client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
-                if hasattr(response, 'data') and len(response.data) > 0:
-                    st.image(response.data[0].url, caption=img_prompt, use_column_width=True)
-                else:
-                    st.error("The API did not return a valid image URL.")
-            except Exception as e: 
-                st.error(f"Generation Failed: {e}")
+            if not client:
+                st.error("Puter API Key missing.")
+            else:
+                try:
+                    response = client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
+                    if hasattr(response, 'data') and len(response.data) > 0:
+                        st.image(response.data[0].url, caption=img_prompt, use_column_width=True)
+                    else:
+                        st.error("The API did not return a valid image URL.")
+                except Exception as e: 
+                    st.error(f"Generation Failed: {e}")
