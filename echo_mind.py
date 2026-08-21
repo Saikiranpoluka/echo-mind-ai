@@ -317,7 +317,7 @@ client = OpenAI(
     base_url="https://api.puter.com/puterai/openai/v1/"
 ) if puter_api_key else None
 
-ACTIVE_MODEL = "anthropic/claude-opus-5"
+ACTIVE_MODEL = "claude-sonnet-5"
 
 LANGUAGES = {
     "English": ("en-US", "en"), "Hindi": ("hi-IN", "hi"),
