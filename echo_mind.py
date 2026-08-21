@@ -331,8 +331,7 @@ chat_client = ChatAnthropic(
     model="claude-opus-5",
     api_key=agent_router_key,
     base_url="https://agentrouter.org/",
-    default_headers=waf_headers,
-    default_request_headers=waf_headers # Provides compatibility for both LangChain v1 & v2
+    default_headers=waf_headers
 ) if agent_router_key else None
 
 LANGUAGES = {
