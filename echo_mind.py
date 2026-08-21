@@ -314,7 +314,7 @@ chat_client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 ) if gemini_api_key else None
 
-ACTIVE_MODEL = "gemini-2.5-flash"
+ACTIVE_MODEL = "gemini-3.6-flash"
 
 # 2. Image Generation Client (Puter Free Tier)
 puter_api_key = st.secrets.get("PUTER_AUTH_TOKEN", "")
