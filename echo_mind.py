@@ -98,7 +98,7 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# 3. CORE DATABASE CONNECTION (Must be at the top!)
+# 3. CORE DATABASE CONNECTION
 def get_db():
     try:
         return mysql.connector.connect(
@@ -107,7 +107,7 @@ def get_db():
             user=st.secrets["mysql"]["user"],
             password=st.secrets["mysql"]["password"],
             database=st.secrets["mysql"]["database"],
-            ssl_ca="ca.pem"
+            ssl_ca="ca.pem"  # Ensure this file is present in your deployment directory
         )
     except Exception as e:
         st.error(f"Database connection failed: {e}")
@@ -290,7 +290,9 @@ def search_long_term_memory(user_query):
             stop_words = {"what", "this", "that", "with", "have", "from", "just", "like", "how", "are", "you", "the", "and"}
             keywords = [w for w in clean_query.split() if len(w) >= 3 and w not in stop_words]
             if "name" in clean_query and "name" not in keywords: keywords.append("name")
-            if not keywords: return ""
+            
+            if not keywords: 
+                return ""
             
             conditions = " OR ".join(["content LIKE %s" for _ in keywords])
             values = tuple([USER_EMAIL] + [f"%{kw}%" for kw in keywords])
@@ -321,7 +323,8 @@ LANGUAGES = {
 # Helper Utilities
 def live_web_search(query):
     try:
-        results = DDGS().text(query + " current live rate today", max_results=3)
+        # Fixed: Removed the hardcoded " current live rate today" query poisoner.
+        results = DDGS().text(query, max_results=3)
         if results: return "\n".join([f"- {r['title']}: {r['body']}" for r in results])
     except Exception: pass
     return ""
@@ -352,15 +355,11 @@ if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = str(uuid.uuid4())
 if "messages" not in st.session_state: 
     st.session_state.messages = []
-if "uploaded_file" not in st.session_state: 
-    st.session_state.uploaded_file = None
 
 # --- SIDEBAR (CLEANER LAYOUT) ---
 with st.sidebar:
-    # 1. User Profile & Core Controls at the TOP
     st.markdown(f"👤 `{USER_EMAIL}`")
     
-    # NEW SECURE LOGOUT LOGIC
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.connected = False
         st.session_state.current_session_id = str(uuid.uuid4())
@@ -369,7 +368,6 @@ with st.sidebar:
         
     st.divider()
     
-    # 2. Settings & Toggles
     st.markdown("### ⚙️ Settings")
     mode = st.radio("Mode:", ["💬 General Chat", "🌐 Live Interpreter", "🎨 Creative Studio"])
     enable_search = st.toggle("🌐 Web Browsing RAG", value=True)
@@ -377,7 +375,6 @@ with st.sidebar:
     
     st.divider()
     
-    # 3. Chat History & Navigation
     if st.button("➕ New Chat", use_container_width=True, type="primary"):
         st.session_state.current_session_id = str(uuid.uuid4())
         st.session_state.messages = []
@@ -409,8 +406,8 @@ if mode == "💬 General Chat":
     with st.popover("➕", use_container_width=False):
         st.markdown("**Attachments**")
         audio_in = st.audio_input("Speak:")
+        # Read straight from the widget to avoid caching UI loops
         uploaded_file = st.file_uploader("Upload Image, PDF, or Text:", type=["png", "jpg", "jpeg", "pdf", "txt"])
-        if uploaded_file is not None: st.session_state.uploaded_file = uploaded_file
 
     prompt = st.chat_input("Ask Echo Mind anything...")
     
@@ -418,9 +415,6 @@ if mode == "💬 General Chat":
         with st.spinner("Transcribing..."):
             spoken_prompt = transcribe_audio(audio_in.read())
             if spoken_prompt: prompt = spoken_prompt
-
-    if st.session_state.uploaded_file and not prompt:
-        prompt = f"Please analyze the attached file ({st.session_state.uploaded_file.name})."
 
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -435,13 +429,12 @@ if mode == "💬 General Chat":
         memory_context = search_long_term_memory(prompt)
 
         doc_text, is_image = "", False
-        active_file = st.session_state.uploaded_file
         
-        if active_file:
-            st.info(f"📎 Attached: {active_file.name}")
-            if active_file.type.startswith("image"): is_image = True
-            elif active_file.name.endswith(".pdf"): doc_text = extract_text_from_pdf(active_file)
-            else: doc_text = active_file.read().decode("utf-8", errors="ignore")
+        if uploaded_file:
+            st.info(f"📎 Attached: {uploaded_file.name}")
+            if uploaded_file.type.startswith("image"): is_image = True
+            elif uploaded_file.name.endswith(".pdf"): doc_text = extract_text_from_pdf(uploaded_file)
+            else: doc_text = uploaded_file.read().decode("utf-8", errors="ignore")
 
         sys_prompt = f"""You are an advanced AI named Echo Mind.
         CRITICAL INSTRUCTION: If LIVE WEB DATA is provided below, rely ONLY on it for prices, exchange rates, and news.
@@ -456,12 +449,13 @@ if mode == "💬 General Chat":
             message_placeholder = st.empty()
             try:
                 if is_image:
-                    active_file.seek(0)
-                    base64_img = encode_image(active_file)
-                    payload = {"model": active_model, "messages": [
-                        {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:{active_file.type};base64,{base64_img}"}}]}
-                    ]}
+                    uploaded_file.seek(0)
+                    base64_img = encode_image(uploaded_file)
+                    # Fixed: Send the image WITH the previous chat history, not overriding it.
+                    history_payload = st.session_state.messages[-8:-1] if len(st.session_state.messages) > 1 else []
+                    image_content = [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:{uploaded_file.type};base64,{base64_img}"}}]
+                    
+                    payload = {"model": active_model, "messages": [{"role": "system", "content": sys_prompt}] + history_payload + [{"role": "user", "content": image_content}]}
                 else:
                     payload = {"model": active_model, "messages": [{"role": "system", "content": sys_prompt}] + st.session_state.messages[-8:]}
 
@@ -473,13 +467,11 @@ if mode == "💬 General Chat":
 
                 st.session_state.messages.append({"role": "assistant", "content": reply})
                 save_chat("assistant", reply, st.session_state.current_session_id)
-                st.session_state.uploaded_file = None 
 
                 if enable_audio_out: st.audio(text_to_speech(reply), format="audio/mp3", autoplay=True)
 
             except Exception as e:
                 st.error(f"Error: {e}")
-                st.session_state.uploaded_file = None
 
 # ---------------- MODE: LIVE INTERPRETER ----------------
 elif mode == "🌐 Live Interpreter":
@@ -494,7 +486,13 @@ elif mode == "🌐 Live Interpreter":
     with col_in:
         audio_val = st.audio_input(f"Record {src_lang_name}:")
         typed_text = st.text_area("Or type here:")
-    input_text = transcribe_audio(audio_val.read(), lang_code=src_stt) if audio_val else typed_text.strip() if typed_text.strip() else None
+    
+    # Fixed: Fallback logic safely checks both audio and text without crashing if one fails.
+    input_text = None
+    if audio_val:
+        input_text = transcribe_audio(audio_val.read(), lang_code=src_stt)
+    if not input_text and typed_text.strip():
+        input_text = typed_text.strip()
 
     with col_out:
         if input_text:
