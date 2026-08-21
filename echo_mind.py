@@ -305,19 +305,25 @@ def search_long_term_memory(user_query):
         except Exception:
             pass
     return "\n".join(relevant_context)
-
-
 # 6. UNIVERSAL API CLIENTS
-# Puter normalizes Anthropic, DeepSeek, and OpenAI endpoints, so we just use the standard OpenAI client for everything.
-puter_api_key = st.secrets.get("PUTER_AUTH_TOKEN", "")
 
-# This single client handles Claude text generation and DALL-E image generation
-client = OpenAI(
+# 1. Text & Chat Client (Google Gemini via Native OpenAI Wrapper)
+gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
+chat_client = OpenAI(
+    api_key=gemini_api_key,
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+) if gemini_api_key else None
+
+ACTIVE_MODEL = "gemini-2.5-flash"
+
+# 2. Image Generation Client (Puter Free Tier)
+puter_api_key = st.secrets.get("PUTER_AUTH_TOKEN", "")
+image_client = OpenAI(
     api_key=puter_api_key, 
     base_url="https://api.puter.com/puterai/openai/v1/"
 ) if puter_api_key else None
 
-ACTIVE_MODEL = "claude-sonnet-5"
+IMAGE_MODEL = "stabilityai/stable-diffusion-3" # Free-tier unlocked model
 
 LANGUAGES = {
     "English": ("en-US", "en"), "Hindi": ("hi-IN", "hi"),
@@ -450,15 +456,14 @@ if mode == "💬 General Chat":
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             
-            if not client:
-                st.error("Puter API Key missing. Please check secrets.toml")
+            if not chat_client:
+                st.error("Gemini API Key missing. Please check secrets.toml")
             else:
                 try:
                     if is_image:
                         uploaded_file.seek(0)
                         base64_img = encode_image(uploaded_file)
                         
-                        # Grab recent history excluding current prompt
                         history_msgs = st.session_state.messages[-8:-1] if len(st.session_state.messages) > 1 else []
                         
                         image_payload = [
@@ -476,8 +481,8 @@ if mode == "💬 General Chat":
                             "messages": [{"role": "system", "content": sys_prompt}] + st.session_state.messages[-8:]
                         }
 
-                    # Standard OpenAI execute (Puter dynamically translates to Anthropic)
-                    response = client.chat.completions.create(**payload)
+                    # Execute via Google Gemini's native API
+                    response = chat_client.chat.completions.create(**payload)
                     reply = response.choices[0].message.content
                     
                     message_placeholder.markdown(reply)
@@ -513,8 +518,8 @@ elif mode == "🌐 Live Interpreter":
         if input_text:
             st.info(f"**Original:** {input_text}")
             with st.spinner("Translating..."):
-                if not client:
-                    st.error("Puter API Key missing.")
+                if not chat_client:
+                    st.error("Gemini API Key missing.")
                 else:
                     try:
                         payload = {
@@ -522,7 +527,7 @@ elif mode == "🌐 Live Interpreter":
                             "messages": [{"role": "user", "content": f"Translate to {tgt_lang_name}. Output ONLY the direct translation of this text: {input_text}"}]
                         }
                         
-                        response = client.chat.completions.create(**payload)
+                        response = chat_client.chat.completions.create(**payload)
                         translated_text = response.choices[0].message.content.strip()
                         
                         st.success(f"**{tgt_lang_name}:**\n\n### {translated_text}")
@@ -536,11 +541,12 @@ elif mode == "🎨 Creative Studio":
     img_prompt = st.text_area("Describe the image:")
     if st.button("✨ Generate", type="primary") and img_prompt:
         with st.spinner("Painting..."):
-            if not client:
+            if not image_client:
                 st.error("Puter API Key missing.")
             else:
                 try:
-                    response = client.images.generate(model="dall-e-3", prompt=img_prompt, n=1, size="1024x1024")
+                    # Execute via Puter using free Stable Diffusion 3 model
+                    response = image_client.images.generate(model=IMAGE_MODEL, prompt=img_prompt, n=1, size="1024x1024")
                     if hasattr(response, 'data') and len(response.data) > 0:
                         st.image(response.data[0].url, caption=img_prompt, use_column_width=True)
                     else:
