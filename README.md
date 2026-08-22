@@ -1,94 +1,171 @@
-# 🧠 Echo Mind: Multimodal AI Workspace
+# 🧠 Echo Mind — Multimodal AI Workspace
+
+> A Python/Streamlit AI workspace that combines multimodal LLM interactions, retrieval-augmented conversation memory, document and image processing, web search, voice features, and MySQL-backed authentication.
 
 ## 📌 Overview
-Echo Mind is a production-grade, multi-tenant AI workspace featuring a liquid-smooth custom UI built on Streamlit. The platform utilizes a dual-client API architecture, leveraging Google's cutting-edge **Gemini 3.6 Flash** for high-speed, long-context text processing and **Stable Diffusion 3** (via Puter) for image generation. 
 
-Designed for security and persistence, Echo Mind features custom MySQL-backed user authentication (bcrypt) and threaded long-term memory retrieval (RAG) for personalized chat sessions.
+Echo Mind is an AI application designed to provide a persistent, multimodal chat experience rather than a single-turn chatbot.
 
----
+The application combines an LLM client for text and vision tasks with an image-generation service, while storing user accounts and conversation history in MySQL. Relevant previous conversations can be retrieved to provide longer-term context.
 
-## 🎯 Key Features
-* **Dual-Client AI Architecture:** Routes text/vision tasks to Google Gemini and image generation tasks to Puter, optimizing API efficiency and bypassing proxy firewalls.
-* **Secure Multi-Tenant Auth:** Fully functional login/signup system with hashed passwords (bcrypt) stored in a secure Aiven MySQL database.
-* **Long-Term Context Memory:** Automatically saves user chat histories to the database and retrieves relevant context (RAG) for continuous, intelligent conversations.
-* **Live Web Browsing:** Integrates DuckDuckGo Search (DDGS) to pull real-time data, prices, and news directly into the LLM's context window.
-* **Multimodal Processing:** Native support for PDF text extraction, Image analysis (Base64 encoding), and Voice Input/Output (SpeechRecognition & gTTS) across 8 global languages.
-* **Liquid UI:** A highly customized, CSS-injected Streamlit interface featuring floating inputs, hidden navigation, and responsive chat bubbles.
+## ✨ Key Capabilities
 
----
+- **Multimodal AI:** Text and image-based interactions.
+- **RAG-style conversation memory:** Stores chat history and retrieves relevant previous context for ongoing conversations.
+- **Document processing:** Extracts text from PDF files for AI-assisted interactions.
+- **Web retrieval:** Uses DuckDuckGo search to bring external information into the application workflow.
+- **Voice features:** Speech recognition and text-to-speech support.
+- **Image generation:** Integrates an external image-generation service through Puter.
+- **User authentication:** MySQL-backed accounts with password hashing using `bcrypt`.
+- **Streamlit UI:** Custom chat interface with responsive styling and application controls.
+
+## 🏗️ High-Level Architecture
+
+```text
+                    ┌──────────────────────┐
+                    │     Streamlit UI     │
+                    └──────────┬───────────┘
+                               │
+                 ┌─────────────┼─────────────┐
+                 │             │             │
+                 ▼             ▼             ▼
+             Text/Image     PDF/Voice     Web Search
+                 │             │             │
+                 └─────────────┼─────────────┘
+                               ▼
+                     ┌──────────────────┐
+                     │   AI Orchestration│
+                     └────────┬─────────┘
+                              │
+              ┌───────────────┼────────────────┐
+              ▼               ▼                ▼
+          Gemini API     Image Service      Retrieval
+              │               │                │
+              └───────────────┼────────────────┘
+                              ▼
+                       ┌─────────────┐
+                       │   MySQL DB  │
+                       │ Users + Chat│
+                       └─────────────┘
+```
 
 ## 🛠️ Tech Stack
-* **Frontend:** Streamlit (Custom CSS)
-* **AI Models:** Google Gemini 3.6 Flash, Stable Diffusion 3
-* **Database:** Aiven MySQL (Secure SSL connection)
-* **Security:** `bcrypt` for password hashing
-* **Audio & Speech:** `SpeechRecognition`, `gTTS`
-* **Data Processing:** `pypdf`, `duckduckgo-search`
 
----
+| Area | Technologies |
+|---|---|
+| Application | Python, Streamlit |
+| AI | Google Gemini, external image-generation API |
+| Retrieval | Conversation-history retrieval, DuckDuckGo Search |
+| Database | MySQL |
+| Authentication | bcrypt |
+| Documents | pypdf |
+| Voice | SpeechRecognition, gTTS |
 
 ## 📂 Project Structure
+
 ```text
-echo-mind/
+echo-mind-ai/
 ├── app/
-│   └── app.py                     # Main Streamlit application and UI logic
+│   └── app.py
 ├── .streamlit/
-│   └── secrets.toml               # API keys and Database credentials (Git-ignored)
-├── ca.pem                         # Aiven MySQL SSL Certificate
+│   └── secrets.toml.example
 ├── .gitignore
 ├── README.md
 └── requirements.txt
-🚀 Getting Started Locally
-Prerequisites
-Python 3.12+
+```
 
-An Aiven MySQL Database
+> Local secrets and private certificates are intentionally excluded from version control.
 
-API Keys from Google AI Studio and Puter
+## 🚀 Run Locally
 
-Installation
-Clone the repository:
+### Prerequisites
 
-Bash
-git clone [https://github.com/Saikiranpoluka/echo-mind.git](https://github.com/Saikiranpoluka/echo-mind.git)
-cd echo-mind
-Create and activate a virtual environment:
+- Python 3.12+
+- MySQL database
+- Gemini API credentials
+- Puter/image-generation credentials if image generation is enabled
 
-Bash
-python -m venv venv
-# Windows:
-.\venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-Install dependencies:
+### 1. Clone the repository
 
-Bash
+```bash
+git clone https://github.com/Saikiranpoluka/echo-mind-ai.git
+cd echo-mind-ai
+```
+
+### 2. Create a virtual environment
+
+```bash
+python -m venv .venv
+```
+
+Activate the environment and install dependencies:
+
+```bash
 pip install -r requirements.txt
-Configure your .streamlit/secrets.toml:
+```
 
-Ini, TOML
-PUTER_AUTH_TOKEN = "your_puter_key_here"
-GEMINI_API_KEY = "your_gemini_key_here"
+### 3. Configure Streamlit secrets
+
+Create `.streamlit/secrets.toml` locally. **Do not commit this file.**
+
+Example:
+
+```toml
+GEMINI_API_KEY = "your_gemini_key"
+PUTER_AUTH_TOKEN = "your_puter_key"
 
 [mysql]
 host = "your_database_host"
-port = 25138
+port = 3306
 user = "your_database_user"
 password = "your_database_password"
 database = "your_database_name"
-Launch the application:
+```
 
-Bash
+Use the actual connection details supplied by your database provider rather than copying values from this example.
+
+### 4. Start the application
+
+```bash
 streamlit run app/app.py
-☁️ Cloud Deployment (Streamlit Community Cloud)
-When deploying to Streamlit Community Cloud, ensure the following steps are taken to bypass security constraints:
+```
 
-Do not push .streamlit/secrets.toml to GitHub. Add your secrets directly into the Streamlit Cloud dashboard under App Settings > Secrets.
+## 🔐 Security Notes
 
-Ensure the ca.pem file is pushed to the root of your GitHub repository so the cloud server can establish a secure SSL connection to the MySQL database.
+- Never commit `.streamlit/secrets.toml`.
+- Never commit API keys, database passwords, or private certificates.
+- The repository ignores `.pem` files and local secret configuration.
+- If a secret has ever been committed, rotate it and remove it from Git history; `.gitignore` alone does not remove previously committed secrets.
 
-Author: Poluka Venkata Sai Kiran Reddy
+## ☁️ Deployment
 
-Degree: B.Tech Electronics and Communications Engineering
+The application can be deployed to Streamlit Community Cloud or another Python-compatible hosting platform.
 
-Focus: Full-Stack AI Engineering & Database Architectures
+For hosted deployments, configure secrets through the platform's secret-management interface rather than storing credentials in the repository.
+
+If the MySQL provider requires an SSL certificate, provide the certificate through the hosting environment's supported secret/file mechanism instead of committing private infrastructure material to the repository.
+
+## 🎯 Engineering Highlights
+
+- Designed a multi-component AI application rather than a single LLM prompt interface.
+- Combined AI inference, retrieval, persistent storage, authentication, document processing, and web retrieval in one workflow.
+- Used hashed passwords rather than storing plaintext credentials.
+- Separated local secrets from source control using Streamlit secrets and `.gitignore`.
+
+## 🔮 Future Improvements
+
+- Add automated unit and integration tests.
+- Split AI, retrieval, database, and authentication logic into dedicated modules.
+- Add structured logging and error monitoring.
+- Introduce conversation-level retrieval evaluation and relevance metrics.
+- Add API endpoints for external clients.
+- Add rate limiting and stronger session/authorization controls.
+- Add containerized deployment and CI checks.
+- Add observability for latency, model usage, failures, and database operations.
+
+## 👤 Author
+
+**Poluka Venkata Sai Kiran Reddy**  
+B.Tech — Electronics and Communication Engineering
+
+**Focus:** Python Development • AI/ML Engineering • LLM Applications • Data & Backend Systems
