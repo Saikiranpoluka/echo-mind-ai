@@ -13,7 +13,7 @@ from openai import OpenAI
 
 # 1. PAGE CONFIGURATION
 st.set_page_config(
-    page_title="Echo Mind - Claude Opus",
+    page_title="Echo Mind",
     page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -132,17 +132,19 @@ def init_auth_db():
     conn = get_db()
     if conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS echo_users (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                email VARCHAR(255) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        cursor.close()
-        conn.close()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS echo_users (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+        finally:
+            cursor.close()
+            conn.close()
 
 def create_user(email, password):
     conn = get_db()
@@ -164,10 +166,12 @@ def authenticate_user(email, password):
     conn = get_db()
     if conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT password_hash FROM echo_users WHERE email = %s", (email,))
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
+        try:
+            cursor.execute("SELECT password_hash FROM echo_users WHERE email = %s", (email,))
+            user = cursor.fetchone()
+        finally:
+            cursor.close()
+            conn.close()
         if user and bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
             return True
     return False
@@ -228,20 +232,22 @@ def save_chat(role, content, session_id):
     conn = get_db()
     if conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS echo_app_chat_history (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                session_id VARCHAR(100),
-                user_email VARCHAR(255),
-                role VARCHAR(20), 
-                content TEXT, 
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cursor.execute("INSERT INTO echo_app_chat_history (session_id, user_email, role, content) VALUES (%s, %s, %s, %s)", (session_id, USER_EMAIL, role, content))
-        conn.commit()
-        cursor.close()
-        conn.close()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS echo_app_chat_history (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    session_id VARCHAR(100),
+                    user_email VARCHAR(255),
+                    role VARCHAR(20),
+                    content TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("INSERT INTO echo_app_chat_history (session_id, user_email, role, content) VALUES (%s, %s, %s, %s)", (session_id, USER_EMAIL, role, content))
+            conn.commit()
+        finally:
+            cursor.close()
+            conn.close()
 
 def load_specific_chat(session_id):
     conn = get_db()
@@ -251,10 +257,12 @@ def load_specific_chat(session_id):
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT role, content FROM echo_app_chat_history WHERE session_id = %s ORDER BY id ASC", (session_id,))
             messages = cursor.fetchall()
-            cursor.close()
-            conn.close()
         except Exception:
             pass
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            conn.close()
     return messages
 
 def get_user_chat_sessions():
@@ -272,10 +280,12 @@ def get_user_chat_sessions():
                 ) ORDER BY id DESC LIMIT 15
             """, (USER_EMAIL,))
             sessions = cursor.fetchall()
-            cursor.close()
-            conn.close()
         except Exception:
             pass
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            conn.close()
     return sessions
 
 def search_long_term_memory(user_query):
@@ -300,10 +310,12 @@ def search_long_term_memory(user_query):
             if rows:
                 relevant_context.append("--- MEMORY ---")
                 for row in rows: relevant_context.append(f"{row['role'].upper()}: {row['content']}")
-            cursor.close()
-            conn.close()
         except Exception:
             pass
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            conn.close()
     return "\n".join(relevant_context)
 # 6. UNIVERSAL API CLIENTS
 
@@ -314,7 +326,7 @@ chat_client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 ) if gemini_api_key else None
 
-ACTIVE_MODEL = "gemini-3.6-flash"
+ACTIVE_MODEL = "gemini-1.5-flash"
 
 # 2. Image Generation Client (Puter Free Tier)
 puter_api_key = st.secrets.get("PUTER_AUTH_TOKEN", "")
@@ -548,7 +560,7 @@ elif mode == "🎨 Creative Studio":
                     # Execute via Puter using free Stable Diffusion 3 model
                     response = image_client.images.generate(model=IMAGE_MODEL, prompt=img_prompt, n=1, size="1024x1024")
                     if hasattr(response, 'data') and len(response.data) > 0:
-                        st.image(response.data[0].url, caption=img_prompt, use_column_width=True)
+                        st.image(response.data[0].url, caption=img_prompt, use_container_width=True)
                     else:
                         st.error("The API did not return a valid image URL.")
                 except Exception as e: 
