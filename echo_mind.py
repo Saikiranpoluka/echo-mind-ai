@@ -10,6 +10,7 @@ import base64
 import pypdf
 import uuid
 from openai import OpenAI
+from contextlib import contextmanager
 
 # 1. PAGE CONFIGURATION
 st.set_page_config(
@@ -128,11 +129,21 @@ def get_db():
         st.error(f"Database connection failed: {e}")
         return None
 
+@contextmanager
+def close_db(conn, cursor=None):
+    try:
+        yield
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
 def init_auth_db():
     conn = get_db()
     if conn:
         cursor = conn.cursor()
-        try:
+        with close_db(conn, cursor):
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS echo_users (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -142,36 +153,28 @@ def init_auth_db():
                 )
             """)
             conn.commit()
-        finally:
-            cursor.close()
-            conn.close()
 
 def create_user(email, password):
     conn = get_db()
     if conn:
         cursor = conn.cursor()
         hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        try:
-            cursor.execute("INSERT INTO echo_users (email, password_hash) VALUES (%s, %s)", (email, hashed_pw.decode('utf-8')))
-            conn.commit()
-            return True
-        except mysql.connector.IntegrityError:
-            return False 
-        finally:
-            cursor.close()
-            conn.close()
+        with close_db(conn, cursor):
+            try:
+                cursor.execute("INSERT INTO echo_users (email, password_hash) VALUES (%s, %s)", (email, hashed_pw.decode('utf-8')))
+                conn.commit()
+                return True
+            except mysql.connector.IntegrityError:
+                return False
     return False
 
 def authenticate_user(email, password):
     conn = get_db()
     if conn:
         cursor = conn.cursor(dictionary=True)
-        try:
+        with close_db(conn, cursor):
             cursor.execute("SELECT password_hash FROM echo_users WHERE email = %s", (email,))
             user = cursor.fetchone()
-        finally:
-            cursor.close()
-            conn.close()
         if user and bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
             return True
     return False
@@ -232,7 +235,7 @@ def save_chat(role, content, session_id):
     conn = get_db()
     if conn:
         cursor = conn.cursor()
-        try:
+        with close_db(conn, cursor):
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS echo_app_chat_history (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -245,77 +248,65 @@ def save_chat(role, content, session_id):
             """)
             cursor.execute("INSERT INTO echo_app_chat_history (session_id, user_email, role, content) VALUES (%s, %s, %s, %s)", (session_id, USER_EMAIL, role, content))
             conn.commit()
-        finally:
-            cursor.close()
-            conn.close()
 
 def load_specific_chat(session_id):
     conn = get_db()
     messages = []
     if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT role, content FROM echo_app_chat_history WHERE session_id = %s ORDER BY id ASC", (session_id,))
-            messages = cursor.fetchall()
-        except Exception:
-            pass
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            conn.close()
+        cursor = conn.cursor(dictionary=True)
+        with close_db(conn, cursor):
+            try:
+                cursor.execute("SELECT role, content FROM echo_app_chat_history WHERE session_id = %s ORDER BY id ASC", (session_id,))
+                messages = cursor.fetchall()
+            except Exception:
+                pass
     return messages
 
 def get_user_chat_sessions():
     conn = get_db()
     sessions = []
     if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("""
-                SELECT session_id, content FROM echo_app_chat_history 
-                WHERE id IN (
-                    SELECT MIN(id) FROM echo_app_chat_history 
-                    WHERE user_email = %s AND role = 'user' 
-                    GROUP BY session_id
-                ) ORDER BY id DESC LIMIT 15
-            """, (USER_EMAIL,))
-            sessions = cursor.fetchall()
-        except Exception:
-            pass
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            conn.close()
+        cursor = conn.cursor(dictionary=True)
+        with close_db(conn, cursor):
+            try:
+                cursor.execute("""
+                    SELECT session_id, content FROM echo_app_chat_history
+                    WHERE id IN (
+                        SELECT MIN(id) FROM echo_app_chat_history
+                        WHERE user_email = %s AND role = 'user'
+                        GROUP BY session_id
+                    ) ORDER BY id DESC LIMIT 15
+                """, (USER_EMAIL,))
+                sessions = cursor.fetchall()
+            except Exception:
+                pass
     return sessions
 
 def search_long_term_memory(user_query):
     conn = get_db()
     relevant_context = []
     if conn:
-        try:
-            cursor = conn.cursor(dictionary=True)
-            clean_query = user_query.lower().replace('?', '').replace('.', '').replace(',', '')
-            stop_words = {"what", "this", "that", "with", "have", "from", "just", "like", "how", "are", "you", "the", "and"}
-            keywords = [w for w in clean_query.split() if len(w) >= 3 and w not in stop_words]
-            if "name" in clean_query and "name" not in keywords: keywords.append("name")
-            
-            if not keywords: return ""
-            
-            conditions = " OR ".join(["content LIKE %s" for _ in keywords])
-            values = tuple([USER_EMAIL] + [f"%{kw}%" for kw in keywords])
-            
-            sql = f"SELECT role, content FROM echo_app_chat_history WHERE user_email = %s AND ({conditions}) ORDER BY id DESC LIMIT 5"
-            cursor.execute(sql, values)
-            rows = cursor.fetchall()
-            if rows:
-                relevant_context.append("--- MEMORY ---")
-                for row in rows: relevant_context.append(f"{row['role'].upper()}: {row['content']}")
-        except Exception:
-            pass
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            conn.close()
+        cursor = conn.cursor(dictionary=True)
+        with close_db(conn, cursor):
+            try:
+                clean_query = user_query.lower().replace('?', '').replace('.', '').replace(',', '')
+                stop_words = {"what", "this", "that", "with", "have", "from", "just", "like", "how", "are", "you", "the", "and"}
+                keywords = [w for w in clean_query.split() if len(w) >= 3 and w not in stop_words]
+                if "name" in clean_query and "name" not in keywords: keywords.append("name")
+
+                if not keywords: return ""
+
+                conditions = " OR ".join(["content LIKE %s" for _ in keywords])
+                values = tuple([USER_EMAIL] + [f"%{kw}%" for kw in keywords])
+
+                sql = f"SELECT role, content FROM echo_app_chat_history WHERE user_email = %s AND ({conditions}) ORDER BY id DESC LIMIT 5"
+                cursor.execute(sql, values)
+                rows = cursor.fetchall()
+                if rows:
+                    relevant_context.append("--- MEMORY ---")
+                    for row in rows: relevant_context.append(f"{row['role'].upper()}: {row['content']}")
+            except Exception:
+                pass
     return "\n".join(relevant_context)
 # 6. UNIVERSAL API CLIENTS
 
@@ -348,7 +339,7 @@ LANGUAGES = {
 def live_web_search(query):
     try:
         results = DDGS().text(query, max_results=3)
-        if results: return "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+        if results: return "\n".join(f"- {r['title']}: {r['body']}" for r in results)
     except Exception: pass
     return ""
 
@@ -371,7 +362,7 @@ def encode_image(file):
 
 def extract_text_from_pdf(file):
     try:
-        return "".join([page.extract_text() + "\n" for page in pypdf.PdfReader(file).pages if page.extract_text()]).strip()
+        return "".join(page.extract_text() + "\n" for page in pypdf.PdfReader(file).pages if page.extract_text()).strip()
     except Exception as e: return f"Error reading PDF: {e}"
 
 # 8. APP STATE INITIALIZATION
